@@ -36,7 +36,6 @@ python3Packages.buildPythonApplication {
   nativeCheckInputs = [ gitMinimal ];
   checkPhase = /* bash */ ''
     runHook preCheck
-    export PYTHONPATH="$PWD/src"
     python -B -m unittest discover -s tests -v
     runHook postCheck
   '';
