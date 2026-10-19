@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "infrastructure-memory"
+version = "0.1.0"
+description = "Workstation-local infrastructure memory with immutable synchronized records"
+requires-python = ">=3.11"
+dependencies = ["cryptography", "numpy", "mcp>=1.20,<2", "onnxruntime", "tokenizers", "huggingface-hub"]
+
+[project.scripts]
+infra-memory = "infrastructure_memory.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
