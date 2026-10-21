@@ -36,6 +36,8 @@ infra-memory --config /path/to/config.json serve
 
 Supervision, resource limits, and automatic startup are the consuming system's responsibility. Agent clients need the same configuration/socket path as the daemon.
 
+The default socket uses `XDG_RUNTIME_DIR` when it is nonempty, otherwise `/run/user/<current UID>`. This keeps systemd services and MCP clients with reduced environments on the same Linux user-runtime path. It does not fall back to the persistent state directory. An explicit `socket` in the configuration file overrides either runtime default; use it consistently if the daemon has a custom runtime directory.
+
 ## Synchronization
 
 Share only the durable records directory, or its dedicated parent folder, among the intended machines. An always-on third peer can store and forward files between workstations that are not online together. Exclude `.pending-*` files in the synchronization tool.

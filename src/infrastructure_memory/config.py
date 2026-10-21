@@ -28,7 +28,7 @@ class Config:
         home = Path.home()
         state = Path(os.environ.get("XDG_STATE_HOME", home / ".local/state"))
         cache = Path(os.environ.get("XDG_CACHE_HOME", home / ".cache"))
-        runtime = Path(os.environ.get("XDG_RUNTIME_DIR", state))
+        runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
         data = {
             "records": str(home / "infrastructure-memory/records"),
             "state": str(state / "infrastructure-memory"),
