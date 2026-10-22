@@ -12,12 +12,12 @@ In the current deployment, `framework` and `desktop` run independent daemons and
 
 This repository owns the application, tests, and independent Nix flake. The consuming `~/nixos-config` repository declares:
 
-| Configuration | Responsibility |
-| --- | --- |
-| `homes/modules/memory.nix` | Package, JSON configuration, repository allowlists, MCP fragment, and user service |
-| `homes/configs/framework.nix`, `homes/configs/desktop.nix` | Enablement through `custom.home.memory.enable` |
-| `modules/services/apps/tools/syncthing/default.nix` | The regular `infrastructure-memory` folder entry and its three peers |
-| `homes/files/agents.nix` | Agent instructions to retrieve context and propose supported memories |
+| Configuration                                              | Responsibility                                                                     |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `homes/modules/memory.nix`                                 | Package, JSON configuration, repository allowlists, MCP fragment, and user service |
+| `homes/configs/framework.nix`, `homes/configs/desktop.nix` | Enablement through `custom.home.memory.enable`                                     |
+| `modules/services/apps/tools/syncthing/default.nix`        | The regular `infrastructure-memory` folder entry and its three peers               |
+| `homes/files/agents.nix`                                   | Agent instructions to retrieve context and propose supported memories              |
 
 The consuming flake currently uses `github:ruiiiijiiiiang/infrastructure-memory`, with this input's nixpkgs following the infrastructure pin. A local development override requires the application checkout on the machine evaluating the flake; publish application changes before expecting a remote input to include them.
 
@@ -27,16 +27,16 @@ Nix builds require explicit authorization under the infrastructure repository's 
 
 The deployed layout uses separate `shared/` and `local/` directories:
 
-| Path | Purpose | Synchronized? |
-| --- | --- | --- |
-| `~/.local/state/infrastructure-memory/shared/records/` | Durable immutable JSON events | Yes |
-| `~/.local/state/infrastructure-memory/local/index.sqlite3` | Disposable materialized records, FTS5 index, and vector cache | No |
-| `~/.local/state/infrastructure-memory/local/keys/operator.key` | Local Ed25519 signing key | No |
-| `~/.local/state/infrastructure-memory/local/keys/trusted/` | Explicitly trusted public keys | No |
-| `~/.cache/infrastructure-memory/models/` | Pinned embedding model files | No |
-| `$XDG_RUNTIME_DIR/infrastructure-memory/service.sock` | Private daemon connection | No |
-| `~/.config/infrastructure-memory/config.json` | Generated CLI, daemon, and adapter configuration | No |
-| `~/.config/infrastructure-memory/mcp.json` | Generated client configuration fragment | No |
+| Path                                                           | Purpose                                                       | Synchronized? |
+| -------------------------------------------------------------- | ------------------------------------------------------------- | ------------- |
+| `~/.local/state/infrastructure-memory/shared/records/`         | Durable immutable JSON events                                 | Yes           |
+| `~/.local/state/infrastructure-memory/local/index.sqlite3`     | Disposable materialized records, FTS5 index, and vector cache | No            |
+| `~/.local/state/infrastructure-memory/local/keys/operator.key` | Local Ed25519 signing key                                     | No            |
+| `~/.local/state/infrastructure-memory/local/keys/trusted/`     | Explicitly trusted public keys                                | No            |
+| `~/.cache/infrastructure-memory/models/`                       | Pinned embedding model files                                  | No            |
+| `$XDG_RUNTIME_DIR/infrastructure-memory/service.sock`          | Private daemon connection                                     | No            |
+| `~/.config/infrastructure-memory/config.json`                  | Generated CLI, daemon, and adapter configuration              | No            |
+| `~/.config/infrastructure-memory/mcp.json`                     | Generated client configuration fragment                       | No            |
 
 Syncthing shares only `~/.local/state/infrastructure-memory/shared` between `framework`, `desktop`, and `vm-app`, retaining folder ID `infrastructure-memory`. It has no memory-specific directory rules, ignore patterns, or Restic integration. The daemon creates its records directory when needed. Keep the `local/` directory, keys, database, model cache, and socket outside every synchronized folder.
 
@@ -102,7 +102,11 @@ A standalone client entry can use an explicit configuration:
   "mcpServers": {
     "infrastructure-memory": {
       "command": "infra-memory",
-      "args": ["--config", "/home/rui/.config/infrastructure-memory/config.json", "mcp"]
+      "args": [
+        "--config",
+        "/home/rui/.config/infrastructure-memory/config.json",
+        "mcp"
+      ]
     }
   }
 }
@@ -110,12 +114,12 @@ A standalone client entry can use an explicit configuration:
 
 Adapt the username and schema to the client. For secret-managed client configuration, merge the fragment through the normal manual secret preparation workflow; preserve the rest of the client configuration.
 
-| MCP tool | Purpose |
-| --- | --- |
-| `search_memory` | Retrieve cited memories or repository documents with optional filters |
-| `get_memory` | Read current heads, competing revisions, provenance, and deletion state |
-| `propose_memory` | Publish an unverified proposal or correction |
-| `memory_status` | Report local ingestion, conflicts, quarantine, and semantic availability |
+| MCP tool         | Purpose                                                                  |
+| ---------------- | ------------------------------------------------------------------------ |
+| `search_memory`  | Retrieve cited memories or repository documents with optional filters    |
+| `get_memory`     | Read current heads, competing revisions, provenance, and deletion state  |
+| `propose_memory` | Publish an unverified proposal or correction                             |
+| `memory_status`  | Report local ingestion, conflicts, quarantine, and semantic availability |
 
 Agent instructions require relevant history retrieval before investigating, verification against current configuration and live telemetry such as Grafana, and a concise proposal after a verified resolution. Records should contain the symptom, evidence, cause, action, and verification. Exclude credentials, decrypted secrets, raw conversation dumps, and bulk logs.
 
@@ -141,7 +145,9 @@ Each result carries source path, line, commit, and a repository-level dirty flag
 
 Reconciliation polls every 15 seconds by default, importing delivered records and refreshing tracked repository changes. It removes documents when source files disappear. Embedding work is bounded per maintenance pass, so allow initial indexing to finish.
 
-The CPU model is `sentence-transformers/all-MiniLM-L6-v2`, pinned to revision `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`. Embeddings are cached by model fingerprint and content hash. Keyword and exact-identifier search remain available if the model is absent or inference fails; inspect `semantic_error` in status and search results.
+The default CPU model is `ibm-granite/granite-embedding-97m-multilingual-r2`, pinned to revision `835ad14087e140460703cf0fae09f97d469d65c2`. It uses the official FP32 `onnx/model.onnx` artifact and produces 384-dimensional vectors with CLS pooling. Inference uses two threads and 256-token segments, including special tokens; long source slices are subdivided by tokenizer offsets, their pooled vectors averaged, and the result L2-normalized. The model's larger native context window is not used. `infra-memory fetch-model` downloads the model, tokenizer, padding, sequence-length, and pooling metadata required for offline inference.
+
+Embeddings are cached by model/pipeline fingerprint and content hash. Keyword and exact-identifier search remain available if the model is absent or inference fails; inspect `semantic_error` in status and search results.
 
 ## Proposals and operator review
 
@@ -192,13 +198,13 @@ infra-memory search 'custom.home.memory.enable' --source repo:nixos-config
 
 Then call MCP `memory_status` and `search_memory` through the agent harness. A fresh installation can have zero memories/events while still reporting repository documents. Review conflicts, pending events, quarantined events, and `semantic_error`. Check Syncthing separately before claiming all peers are up to date.
 
-| Symptom | Checks and action |
-| --- | --- |
+| Symptom                                               | Checks and action                                                                                                                                                                                                                            |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CLI works but MCP returns `No such file or directory` | Verify client configuration and socket selection. The adapter needs the same configuration as the daemon and the runtime-directory fallback described above. Refresh old store-path client entries after deployment and restart the harness. |
-| Ordinary search misses repository content | Use `--source repo:NAME` or `--source all`; memory-only search is the default. Check the file is tracked, allowlisted, and eligible for ingestion. |
-| Semantic search unavailable | Check `semantic_error`, the configured model cache, and whether `infra-memory fetch-model` has completed. Keyword search remains available. |
-| Peer records missing | Check Syncthing connectivity, shared-folder path, folder errors, and completion. Local ingestion status cannot establish peer freshness. |
-| Events pending or quarantined | Inspect status and source evidence. Missing parents and cycles remain pending; malformed events, invalid/unknown signatures, and UUID payload collisions are quarantined. Trust changes require operator action. |
+| Ordinary search misses repository content             | Use `--source repo:NAME` or `--source all`; memory-only search is the default. Check the file is tracked, allowlisted, and eligible for ingestion.                                                                                           |
+| Semantic search unavailable                           | Check `semantic_error`, the configured model cache, and whether `infra-memory fetch-model` has completed. Keyword search remains available.                                                                                                  |
+| Peer records missing                                  | Check Syncthing connectivity, shared-folder path, folder errors, and completion. Local ingestion status cannot establish peer freshness.                                                                                                     |
+| Events pending or quarantined                         | Inspect status and source evidence. Missing parents and cycles remain pending; malformed events, invalid/unknown signatures, and UUID payload collisions are quarantined. Trust changes require operator action.                             |
 
 Use the configured Grafana service for infrastructure logs. Do not edit published events to repair ordinary knowledge; propose a revision. An observed UUID collision remains quarantined locally even if one conflicting file disappears, so investigate before rebuilding the index.
 
@@ -216,14 +222,14 @@ Back up records, private keys, and trust configuration separately if required; a
 
 The flake is independent of `nixos-config` and pins nixpkgs in its own lock file. Outputs are provided for `x86_64-linux` and `aarch64-linux`:
 
-| Output | Purpose |
-| --- | --- |
-| `packages.<system>.default` | The `infra-memory` application |
-| `packages.<system>.infrastructure-memory` | Named package alias |
-| `apps.<system>.default` | CLI entry point |
-| `checks.<system>.package` | Package build with the unit/integration suite |
-| `devShells.<system>.default` | Python dependencies, Ruff, and Git |
-| `formatter.<system>` | Nix formatter |
+| Output                                    | Purpose                                       |
+| ----------------------------------------- | --------------------------------------------- |
+| `packages.<system>.default`               | The `infra-memory` application                |
+| `packages.<system>.infrastructure-memory` | Named package alias                           |
+| `apps.<system>.default`                   | CLI entry point                               |
+| `checks.<system>.package`                 | Package build with the unit/integration suite |
+| `devShells.<system>.default`              | Python dependencies, Ruff, and Git            |
+| `formatter.<system>`                      | Nix formatter                                 |
 
 When development-shell realization is authorized, enter the environment and run:
 

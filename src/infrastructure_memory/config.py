@@ -3,8 +3,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+MODEL = "ibm-granite/granite-embedding-97m-multilingual-r2"
+REVISION = "835ad14087e140460703cf0fae09f97d469d65c2"
 
 
 @dataclass
