@@ -39,16 +39,24 @@ Four candidates were compared in FP32 and INT8 ONNX variants on the desktop's Ry
 
 The frozen dataset contained 580 chunks: 455 from the configured NixOS repository allowlist, 101 from dotfiles, and 24 synthetic operational memories, including similar-looking distractors. The 84 agent-authored questions comprised 48 repository paraphrases, 12 exact identifiers, and 24 synthetic incident questions. Evaluation covered semantic-only search and the unchanged hybrid ranking, with file/memory-level relevance labels. Each variant had one indexing pass, a query warmup pass, and three shuffled measured passes. Latencies below include query embedding and in-process hybrid retrieval, excluding MCP transport.
 
-| Candidate | Hybrid MRR@10, FP32 / INT8 | Median query ms, FP32 / INT8 | Peak RSS MiB, FP32 / INT8 |
-| --- | --- | --- | --- |
-| `sentence-transformers/all-MiniLM-L6-v2` | 0.660 / 0.660 | 10.6 / 9.4 | 228 / 154 |
-| `ibm-granite/granite-embedding-small-english-r2` (47M) | 0.700 / 0.690 | 36.8 / 14.5 | 338 / 208 |
-| `ibm-granite/granite-embedding-english-r2` (149M) | 0.714 / 0.697 | 43.2 / 31.0 | 712 / 317 |
-| `ibm-granite/granite-embedding-97m-multilingual-r2` | 0.704 / 0.690 | 17.8 / 34.1 | 780 / 384 |
+| Candidate                                              | Hybrid MRR@10, FP32 / INT8 | Median query ms, FP32 / INT8 | Peak RSS MiB, FP32 / INT8 |
+| ------------------------------------------------------ | -------------------------- | ---------------------------- | ------------------------- |
+| `sentence-transformers/all-MiniLM-L6-v2`               | 0.660 / 0.660              | 10.6 / 9.4                   | 228 / 154                 |
+| `ibm-granite/granite-embedding-small-english-r2` (47M) | 0.700 / 0.690              | 36.8 / 14.5                  | 338 / 208                 |
+| `ibm-granite/granite-embedding-english-r2` (149M)      | 0.714 / 0.697              | 43.2 / 31.0                  | 712 / 317                 |
+| `ibm-granite/granite-embedding-97m-multilingual-r2`    | 0.704 / 0.690              | 17.8 / 34.1                  | 780 / 384                 |
 
 MRR@10 rewards finding the first relevant result earlier; higher is better. The selected 97M FP32 model balanced ranking, latency, official artifact availability, and indexing cost: 63 seconds for this corpus versus 358 seconds for 149M FP32, excluding downloads and daemon maintenance pacing. It ranked the expected synthetic incident first on 24/24 questions versus MiniLM's 20/24. The 149M FP32 model had the highest MRR, while 47M INT8 had the highest hybrid top-five success rate (75/84). The tested 97M INT8 artifact was slower and less accurate than its FP32 counterpart on this stack.
 
 This was a preliminary local comparison, not a statistically decisive quality win: the paired bootstrap 95% interval for 97M FP32's MRR gain over MiniLM included zero. File-level labels can over-credit chunks that lack the answer, and synthetic incidents do not establish real troubleshooting quality. The Framework was unreachable, so laptop latency and battery use remain unmeasured. These results support the current default without requiring a higher memory cap.
+
+## MCP adapter
+
+The stdio adapter uses the official MCP Python SDK 2.3 `MCPServer`, replacing the SDK 1 bundled `FastMCP`. It retains the four tools (`search_memory`, `get_memory`, `propose_memory`, `memory_status`), their arguments, and JSON text responses, and publishes object schemas with matching structured results. Both legacy `2025-11-25` initialization and `2026-07-28` discovery are covered by real-client integration tests.
+
+Synchronous tool functions run in SDK worker threads. Each call opens its own Unix RPC connection; the daemon continues to serialize store/SQLite access with its existing lock. Daemon-reported failures use a dedicated `RPCError`, translated to SDK `ToolError` so validation messages reach the client. Unexpected transport, decoding, or adapter exceptions retain SDK 2's generic client error and stderr diagnostics. Operator signing and trust actions remain available only through the CLI.
+
+The Python dependency range is `mcp>=2.3,<3`. Nix pins SDK and `mcp-types` to 2.3.0, with the required matching HTTP client packages, through a local override of the existing nixpkgs definitions. This avoids changing the broader nixpkgs lock while it still packages SDK 2.2. Deployment does not change the daemon RPC or durable event formats.
 
 ## Package boundary
 

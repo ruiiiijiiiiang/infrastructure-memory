@@ -433,6 +433,12 @@ class MemoryTest(unittest.TestCase):
 
 class IntegrationTest(unittest.TestCase):
     def test_real_daemon_and_mcp_client(self):
+        self.exercise_mcp(legacy=True)
+
+    def test_real_daemon_and_mcp_discover_client(self):
+        self.exercise_mcp(legacy=False)
+
+    def exercise_mcp(self, legacy):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             configuration = {
@@ -477,9 +483,15 @@ class IntegrationTest(unittest.TestCase):
                     )
                     async with stdio_client(params) as (read, write):
                         async with ClientSession(read, write) as session:
-                            await session.initialize()
-                            names = {
-                                tool.name for tool in (await session.list_tools()).tools
+                            if legacy:
+                                await session.initialize()
+                                self.assertEqual("2025-11-25", session.protocol_version)
+                            else:
+                                await session.discover()
+                                self.assertEqual("2026-07-28", session.protocol_version)
+                            tools = {
+                                tool.name: tool
+                                for tool in (await session.list_tools()).tools
                             }
                             self.assertEqual(
                                 {
@@ -488,7 +500,41 @@ class IntegrationTest(unittest.TestCase):
                                     "propose_memory",
                                     "memory_status",
                                 },
-                                names,
+                                set(tools),
+                            )
+                            self.assertEqual(
+                                ["query"],
+                                tools["search_memory"].input_schema["required"],
+                            )
+                            self.assertEqual(
+                                ["title", "text"],
+                                tools["propose_memory"].input_schema["required"],
+                            )
+                            result = await session.call_tool("memory_status", {})
+                            self.assertFalse(result.is_error, str(result))
+                            self.assertEqual(
+                                json.loads(result.content[0].text),
+                                result.structured_content,
+                            )
+                            result = await session.call_tool(
+                                "search_memory", {"query": ""}
+                            )
+                            self.assertTrue(result.is_error, str(result))
+                            self.assertIn(
+                                "query must contain 1-2000 characters",
+                                result.content[0].text,
+                            )
+                            result = await session.call_tool(
+                                "propose_memory",
+                                {
+                                    "title": "invalid",
+                                    "text": "missing parent",
+                                    "memory_id": "x",
+                                },
+                            )
+                            self.assertTrue(result.is_error, str(result))
+                            self.assertIn(
+                                "explicit parent revision", result.content[0].text
                             )
                             result = await session.call_tool(
                                 "propose_memory",
@@ -497,21 +543,26 @@ class IntegrationTest(unittest.TestCase):
                                     "text": "DNS gateway incident",
                                 },
                             )
-                            self.assertFalse(result.isError, str(result))
+                            self.assertFalse(result.is_error, str(result))
                             saved = json.loads(result.content[0].text)
                             result = await session.call_tool(
                                 "search_memory", {"query": "DNS"}
                             )
-                            self.assertFalse(result.isError, str(result))
+                            self.assertFalse(result.is_error, str(result))
                             found = json.loads(result.content[0].text)
                             self.assertEqual(
-                                saved["memory_id"], found["results"][0]["memory_id"]
+                                saved["memory_id"],
+                                found["results"][0]["memory_id"],
                             )
                             self.assertFalse(found["results"][0]["verified"])
                             result = await session.call_tool(
                                 "get_memory", {"memory_id": saved["memory_id"]}
                             )
-                            self.assertFalse(result.isError, str(result))
+                            self.assertFalse(result.is_error, str(result))
+                            self.assertEqual(
+                                saved["memory_id"],
+                                result.structured_content["memory_id"],
+                            )
                             return saved
 
                 saved = asyncio.run(exercise())

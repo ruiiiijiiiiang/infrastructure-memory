@@ -114,6 +114,8 @@ A standalone client entry can use an explicit configuration:
 
 Adapt the username and schema to the client. For secret-managed client configuration, merge the fragment through the normal manual secret preparation workflow; preserve the rest of the client configuration.
 
+The stdio adapter uses the official MCP Python SDK 2.3 (`mcp`), with support for both the legacy `2025-11-25` initialization handshake and `2026-07-28` discovery. Existing client command/arguments remain valid. After manually deploying the upgrade, restart agent connections and check `memory_status` and `search_memory`. No record conversion or index reset is required. Daemon validation failures are returned as tool errors; unexpected adapter failures are logged to stderr and receive a generic tool error.
+
 | MCP tool         | Purpose                                                                  |
 | ---------------- | ------------------------------------------------------------------------ |
 | `search_memory`  | Retrieve cited memories or repository documents with optional filters    |
@@ -240,7 +242,9 @@ ruff check .
 ruff format --check .
 ```
 
-The suite uses temporary records and a real MCP SDK client without model downloads or running infrastructure. Its Unix-socket integration test needs permission to create a local socket. It covers revision ordering, offline conflicts, signatures/trust, tombstones, invalid events, repository scope, retrieval, and daemon/MCP operation. Simulated third-peer delivery does not replace a live Syncthing check.
+The suite uses temporary records and real MCP SDK clients without model downloads or running infrastructure. Its Unix-socket integration tests need permission to create local sockets. They exercise both MCP handshakes, tool schemas, JSON text and structured results, validation errors, and the operator CLI boundary. The suite also covers revision ordering, offline conflicts, signatures/trust, tombstones, invalid events, repository scope, and retrieval. Simulated third-peer delivery does not replace a live Syncthing check.
+
+Python installations require `mcp>=2.3,<3`. The Nix package and development shell select SDK 2.3.0 through local overrides in `default.nix`: the pinned nixpkgs provides SDK 2.2, so this file overrides the SDK, matching `mcp-types`, HTTP dependencies, and the upstream test dependency locally. Remove these overrides when the pinned package set supplies compatible versions. Updating this application's SDK does not require the standalone `fastmcp` package.
 
 The following commands build derivations; run them only when builds are authorized:
 

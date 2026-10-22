@@ -7,7 +7,7 @@ name = "infrastructure-memory"
 version = "0.1.0"
 description = "Workstation-local infrastructure memory with immutable synchronized records"
 requires-python = ">=3.11"
-dependencies = ["cryptography", "numpy", "mcp>=1.20,<2", "onnxruntime", "tokenizers", "huggingface-hub"]
+dependencies = ["cryptography", "numpy", "mcp>=2.3,<3", "onnxruntime", "tokenizers", "huggingface-hub"]
 
 [project.scripts]
 infra-memory = "infrastructure_memory.cli:main"
