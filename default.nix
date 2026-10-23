@@ -32,6 +32,7 @@ let
   mcp-types = python3Packages.mcp-types.override { mcp_2 = mcp; };
   blockbuster = python3Packages.blockbuster.overridePythonAttrs {
     version = "1.5.27";
+    enabledTestPaths = [ "tests" ];
     src = fetchFromGitHub {
       owner = "cbornet";
       repo = "blockbuster";
