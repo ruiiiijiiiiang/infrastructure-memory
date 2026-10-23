@@ -6,7 +6,7 @@ The durable source is one immutable JSON document per event. Each document has a
 
 Publication writes and flushes a `.pending-*` file in the records directory, then uses a hard link to publish a unique final filename atomically without overwriting an existing record. The directory is flushed before the temporary file is removed. Startup reconciliation recovers a publication completed before local index import.
 
-Transport does not need transaction-level database replication. Each workstation validates/imports received events idempotently and maintains a private SQLite metadata/full-text index and vector cache.
+Each workstation validates/imports local events idempotently and maintains a private SQLite metadata/full-text index and vector cache. The plaintext JSON event files in `shared/records/` can optionally be synchronized by an external tool. The same reconciliation imports delivered events; transport does not need transaction-level database replication.
 
 ## Revision semantics
 
@@ -19,7 +19,7 @@ Transport does not need transaction-level database replication. Each workstation
 - Duplicate IDs with different payloads are quarantined, including recognized synchronization conflict copies.
 - Trusted operator public keys are configured locally and checked during reconciliation.
 
-These controls provide an application/API boundary, not isolation from arbitrary processes sharing the operator's OS identity. Private keys and the trust store must remain outside the synchronized folder and agent workflows.
+These controls provide an application/API boundary, not isolation from arbitrary processes sharing the operator's OS identity. Private keys and the trust store must remain outside the synchronized folder. Agent policy may delegate invocation of the approval CLI after explicit user confirmation of exact displayed content and its revision ID; the CLI handles signing internally. Direct agent access to private-key contents and agent changes to trust remain prohibited. Conversational confirmation is enforced by agent instructions, not independently authenticated by the record protocol. The [operating guide](../README.md#proposals-and-operator-review) describes review and verification.
 
 ## Retrieval
 

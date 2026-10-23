@@ -1,46 +1,31 @@
 # infrastructure-memory
 
-Persistent operational knowledge for local AI agents. Each workstation runs a memory daemon, SQLite search index, and CPU embedding model. Immutable JSON records carry incidents, facts, decisions, and runbooks between machines through Syncthing or another file transport.
+Your services become unreachable after a router reboot. An AI agent checks logs, traces the network path, and eventually finds a gateway DHCP issue. You apply the fix, and connectivity returns. Weeks later, it happens again. In a new conversation, the agent has no record of the earlier investigation and starts from scratch.
+
+With infrastructure-memory, the agent saves the symptoms, evidence, cause, fix, and verification from the first incident. Next time, it retrieves that context and checks whether the same cause applies, giving it a starting point for the investigation.
+
+Persistent operational knowledge for local AI agents. Each workstation runs a memory daemon, SQLite search index, and CPU embedding model. Incidents, facts, decisions, and runbooks are stored locally as immutable JSON records. A single-machine installation works without any synchronization service.
 
 This README is the operating guide for configuration, setup, agent connections, operator review, and recovery. [Record and retrieval design](docs/design.md) describes the underlying protocol and implementation.
 
 The daemon listens on a private Unix socket. An MCP stdio adapter exposes search, read, proposal, and status tools to agents. Approval, conflict resolution, and deletion are signed operator CLI actions.
 
-## Deployment and ownership
+## Local storage
 
-In the current deployment, `framework` and `desktop` run independent daemons and indexes. `vm-app` stores and forwards the shared records through Syncthing without running a memory daemon. Workstations can operate offline and receive each other's records later.
+The recommended layout uses separate `shared/` and `local/` directories. `shared/records/` contains plaintext JSON event files that can be synchronized between machines by an external tool, or kept entirely local:
 
-This repository owns the application, tests, and independent Nix flake. The consuming `~/nixos-config` repository declares:
-
-| Configuration                                              | Responsibility                                                                     |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `homes/modules/memory.nix`                                 | Package, JSON configuration, repository allowlists, MCP fragment, and user service |
-| `homes/configs/framework.nix`, `homes/configs/desktop.nix` | Enablement through `custom.home.memory.enable`                                     |
-| `modules/services/apps/tools/syncthing/default.nix`        | The regular `infrastructure-memory` folder entry and its three peers               |
-| `homes/files/agents.nix`                                   | Agent instructions to retrieve context and propose supported memories              |
-
-The consuming flake currently uses `github:ruiiiijiiiiang/infrastructure-memory`, with this input's nixpkgs following the infrastructure pin. A local development override requires the application checkout on the machine evaluating the flake; publish application changes before expecting a remote input to include them.
-
-Nix builds require explicit authorization under the infrastructure repository's rules. Deployments and operator signing/trust actions are performed manually. Editing configuration does not move existing records or keys.
-
-## Storage and synchronization
-
-The deployed layout uses separate `shared/` and `local/` directories:
-
-| Path                                                           | Purpose                                                       | Synchronized? |
+| Path                                                           | Purpose                                                       | Share between machines? |
 | -------------------------------------------------------------- | ------------------------------------------------------------- | ------------- |
-| `~/.local/state/infrastructure-memory/shared/records/`         | Durable immutable JSON events                                 | Yes           |
+| `~/.local/state/infrastructure-memory/shared/records/`         | Durable immutable plaintext JSON events                       | Optional      |
 | `~/.local/state/infrastructure-memory/local/index.sqlite3`     | Disposable materialized records, FTS5 index, and vector cache | No            |
 | `~/.local/state/infrastructure-memory/local/keys/operator.key` | Local Ed25519 signing key                                     | No            |
 | `~/.local/state/infrastructure-memory/local/keys/trusted/`     | Explicitly trusted public keys                                | No            |
 | `~/.cache/infrastructure-memory/models/`                       | Pinned embedding model files                                  | No            |
 | `$XDG_RUNTIME_DIR/infrastructure-memory/service.sock`          | Private daemon connection                                     | No            |
-| `~/.config/infrastructure-memory/config.json`                  | Generated CLI, daemon, and adapter configuration              | No            |
-| `~/.config/infrastructure-memory/mcp.json`                     | Generated client configuration fragment                       | No            |
+| `~/.config/infrastructure-memory/config.json`                  | CLI, daemon, and adapter configuration                        | No            |
+| `~/.config/infrastructure-memory/mcp.json`                     | Optional client configuration fragment                        | No            |
 
-Syncthing shares only `~/.local/state/infrastructure-memory/shared` between `framework`, `desktop`, and `vm-app`, retaining folder ID `infrastructure-memory`. It has no memory-specific directory rules, ignore patterns, or Restic integration. The daemon creates its records directory when needed. Keep the `local/` directory, keys, database, model cache, and socket outside every synchronized folder.
-
-Records are eventually consistent. Status reports the local import state and cannot certify peer delivery or freshness. Check Syncthing separately for connected peers, folder errors, and synchronization completion. Replication does not provide an independent backup; arrange any record and key backups through the operator's normal backup procedure.
+The daemon creates its records directory when needed. Keep records separate from the database, keys, model cache, and socket, even when using only one machine.
 
 ## Configuration
 
@@ -53,23 +38,17 @@ For a standalone installation, create a JSON configuration using the recommended
   "records": "~/.local/state/infrastructure-memory/shared/records",
   "state": "~/.local/state/infrastructure-memory/local",
   "cache": "~/.cache/infrastructure-memory",
-  "repositories": [
-    {
-      "name": "nixos-config",
-      "path": "~/nixos-config",
-      "include": ["hosts/*.nix", "README.md"]
-    }
-  ],
+  "repositories": [],
   "semantic": true,
   "interval": 15
 }
 ```
 
-Paths expand `~`; use absolute paths or home-relative paths appropriate to the local user. Repository indexing is optional and defaults to an empty list. The generated Home Manager configuration contains the deployment's actual allowlists; edit its Nix declaration to change them.
+Paths expand `~`; use absolute paths or home-relative paths appropriate to the local user. Repository indexing is optional and defaults to an empty list. To index a checkout, add an entry such as `{"name": "my-project", "path": "~/Projects/my-project", "include": ["README.md", "docs/*.md"]}` to `repositories`. The generated Home Manager configuration contains the deployment's actual allowlists; edit its Nix declaration to change them.
 
 Omitting `socket` selects `$XDG_RUNTIME_DIR/infrastructure-memory/service.sock` when `XDG_RUNTIME_DIR` is nonempty, otherwise `/run/user/<current UID>/infrastructure-memory/service.sock`. This keeps systemd and MCP clients with reduced environments on the same socket. A custom `socket` must agree between the daemon and every client. Records must be separate from the configured state, cache, and socket directories; the sibling `shared/` and `local/` layout satisfies this validation.
 
-Without a configuration file, the standalone application's legacy defaults remain `~/infrastructure-memory/records` for records and `$XDG_STATE_HOME/infrastructure-memory` for state, with `~/.local/state` as the state-home fallback. Supply the configuration above to use the deployed layout. The cache defaults to `$XDG_CACHE_HOME/infrastructure-memory`, falling back to `~/.cache/infrastructure-memory`.
+Without a configuration file, records default to `~/infrastructure-memory/records` and state to `$XDG_STATE_HOME/infrastructure-memory`, with `~/.local/state` as the state-home fallback. Supply the configuration above to use the recommended layout. The cache defaults to `$XDG_CACHE_HOME/infrastructure-memory`, falling back to `~/.cache/infrastructure-memory`.
 
 Run one daemon per workstation user. The deployed installation uses `infrastructure-memory.service` under the user systemd manager. A standalone daemon can be started with:
 
@@ -81,21 +60,30 @@ Supervision and resource limits belong to the consuming system. The current Home
 
 ## First-time setup
 
-After manually installing or deploying the configuration:
+After installing the application, save the configuration above as `~/.config/infrastructure-memory/config.json`. Use the same `--config` argument for setup, daemon, adapter, and administrative commands. Commands below omit it for brevity; you can set `INFRA_MEMORY_CONFIG` instead:
 
-1. Confirm Syncthing's folder path and its intended peers. Synchronize only `shared/`.
-2. On each workstation, run `infra-memory key-init` yourself. It creates a key if missing, retains an existing key, trusts its public key locally, and prints the public key. Verify the other workstation's public key through a trusted channel, then explicitly import it with `infra-memory trust-key PUBLIC_KEY_HEX`. Keep private keys and trust management outside agent workflows.
-3. Restart the user service after initializing keys so its private-key restriction applies: `systemctl --user restart infrastructure-memory.service`.
-4. Run `infra-memory fetch-model` explicitly on each workstation to download the pinned model assets. The daemon uses cached files only; keyword search works before this download completes.
-5. Run `infra-memory status` and a repository search, then configure each agent's MCP connection as described below.
+```sh
+export INFRA_MEMORY_CONFIG="$HOME/.config/infrastructure-memory/config.json"
+```
 
-For standalone installations, use the same `--config` argument for setup, daemon, adapter, and administrative commands. Existing installations should preserve their signing keys and trusted public keys through path changes.
+Then:
+
+1. Run `infra-memory key-init` yourself. It creates a key if missing, retains an existing key, trusts its public key locally, and prints the public key. This enables local operator approval, resolution, and deletion. Keep private keys and trust management outside agent workflows.
+2. Run `infra-memory fetch-model` to enable semantic search. The daemon uses cached files only; keyword search works without downloading the model. Set `"semantic": false` for keyword-only use.
+3. Start the daemon with `infra-memory serve` in a separate terminal using the same configuration. If using the Home Manager service, restart it after initializing keys so its private-key restriction applies: `systemctl --user restart infrastructure-memory.service`.
+4. Run `infra-memory status` and configure each agent's MCP connection as described below. A fresh installation has no memories; if you configured repository indexing, check it with `infra-memory search 'QUERY' --source repo:NAME`.
+
+## Optional synchronization
+
+An external tool can synchronize the plaintext JSON files in `shared/records/`. Keep the `local/` directory, keys, database, model cache, and socket outside every synchronized folder. Each workstation runs its own daemon and index and imports delivered records on reconciliation. No synchronization setup is needed for single-machine use.
+
+Run `infra-memory key-init` yourself on each workstation. Verify each operator's public key through a trusted channel, then import it on machines that should accept that operator's signed actions with `infra-memory trust-key PUBLIC_KEY_HEX`. Private keys stay local.
+
+Replicated records are eventually consistent. Status reports the local import state and cannot certify peer delivery or freshness. Check synchronization through your external tool. Replication does not provide an independent backup; arrange record and key backups separately as needed.
 
 ## Connecting agents
 
-Merge the generated `~/.config/infrastructure-memory/mcp.json` fragment into each agent client's configuration using that client's schema. It selects the Home Manager wrapper with the `mcp` argument. After package or wrapper updates, refresh client entries containing old Nix store executable paths and restart the harness to replace an already-running adapter.
-
-A standalone client entry can use an explicit configuration:
+A standalone client entry uses an explicit configuration:
 
 ```json
 {
@@ -104,7 +92,7 @@ A standalone client entry can use an explicit configuration:
       "command": "infra-memory",
       "args": [
         "--config",
-        "/home/rui/.config/infrastructure-memory/config.json",
+        "/home/your-user/.config/infrastructure-memory/config.json",
         "mcp"
       ]
     }
@@ -112,7 +100,7 @@ A standalone client entry can use an explicit configuration:
 }
 ```
 
-Adapt the username and schema to the client. For secret-managed client configuration, merge the fragment through the normal manual secret preparation workflow; preserve the rest of the client configuration.
+Adapt the username and schema to the client. For a Home Manager installation, merge the generated `~/.config/infrastructure-memory/mcp.json` fragment into the client configuration; it selects the wrapper with the `mcp` argument. After package or wrapper updates, refresh client entries containing old Nix store executable paths and restart the harness to replace an already-running adapter. For secret-managed client configuration, merge the fragment through the normal manual secret preparation workflow; preserve the rest of the client configuration.
 
 The stdio adapter uses the official MCP Python SDK 2.3 (`mcp`), with support for both the legacy `2025-11-25` initialization handshake and `2026-07-28` discovery. Existing client command/arguments remain valid. After manually deploying the upgrade, restart agent connections and check `memory_status` and `search_memory`. No record conversion or index reset is required. Daemon validation failures are returned as tool errors; unexpected adapter failures are logged to stderr and receive a generic tool error.
 
@@ -123,7 +111,7 @@ The stdio adapter uses the official MCP Python SDK 2.3 (`mcp`), with support for
 | `propose_memory` | Publish an unverified proposal or correction                             |
 | `memory_status`  | Report local ingestion, conflicts, quarantine, and semantic availability |
 
-Agent instructions require relevant history retrieval before investigating, verification against current configuration and live telemetry such as Grafana, and a concise proposal after a verified resolution. Records should contain the symptom, evidence, cause, action, and verification. Exclude credentials, decrypted secrets, raw conversation dumps, and bulk logs.
+Agent instructions require relevant history retrieval before investigating, verification against current configuration and live telemetry such as Grafana, and a concise proposal after a verified resolution. Records should contain the symptom, evidence, cause, action, and verification. Exclude credentials, decrypted secrets, raw conversation dumps, and bulk logs. After saving a proposal or correction, the agent must retrieve it and show the exact saved content and revision identifiers for review, as described below.
 
 Retrieved text is untrusted evidence. Check observation time, provenance, verification status, and competing revisions; repository documents describe a local checkout, not proof of deployment. Instruction-driven proposal creation depends on agents following these rules. Hosted reasoning models may receive retrieved context even when storage and embeddings are local.
 
@@ -170,14 +158,22 @@ An agent uses `propose_memory`; a human can submit a JSON parameter file with `i
 
 Categories are `incident`, `fact`, `decision`, and `runbook`. Scope is `intended`, `observed`, or `historical`. Observation time may be null; supplied timestamps require a timezone. Corrections add the existing `memory_id` and one explicit `parent` revision ID to the proposal parameters.
 
-Proposals are unverified. Review the evidence and current heads, then explicitly approve the exact revision yourself:
+Proposals are unverified. After saving a proposal or correction, the agent must retrieve it with `get_memory` and show its exact saved content in the user-visible response: the full title, text, category, scope, hosts, services, observed_at, and evidence, plus the memory ID and revision ID. A save notification, summary, or link is insufficient. The same review applies when approving an existing memory.
+
+Under the current deployment's agent policy, explicit conversational confirmation authorizes the agent to approve that exact displayed revision through the existing CLI. The agent must perform the approval without asking the user to run the command or requesting a second conversational confirmation. Permission to save, confirmation that the incident is resolved, silence, or approval of another revision does not authorize approval. Other installations must explicitly authorize this delegation in their agent instructions; MCP-only clients cannot invoke the approval CLI.
+
+Before approving, the agent retrieves the memory again and checks that the displayed revision remains a current head with identical content. If it changed or was superseded, the agent shows the current content and obtains fresh confirmation. Approval applies only to that revision; competing heads and later corrections need separate review and confirmation.
+
+The agent uses the daemon's configuration for the CLI command below, then waits for reconciliation and retrieves the memory to confirm that the same revision reports `verified: true`. It reports success only after this check, or reports the failure or pending state if approval cannot be confirmed. A human can also run these commands directly:
 
 ```sh
 infra-memory get MEMORY_UUID
 infra-memory approve MEMORY_UUID REVISION_UUID
 ```
 
-Approval binds the exact reviewed parent payload by hash. A later proposal requires separate approval. An approval from an unknown signing key is quarantined until the operator establishes trust locally. Signed operator actions are absent from the MCP tools and daemon RPC interface; agents must not access operator keys or change the trust store. These controls provide an application/API boundary and do not isolate arbitrary processes running under the same OS user.
+Approval binds the exact reviewed parent payload by hash. `verified: true` indicates accepted operator approval or a signed operator resolution; it does not independently establish factual accuracy. An approval from an unknown signing key is quarantined until the operator establishes trust locally.
+
+Signed operator actions are absent from the MCP tools and daemon RPC interface. User-confirmed approval permits the agent to invoke the signing CLI, which handles the private key internally; agents must not directly read, copy, export, or display operator keys or change the trust store. If CLI access or signing is unavailable, the agent reports the blocker. Deletion and conflict resolution remain manual operator actions. Delegating approval relies on the agent honoring the conversational confirmation; the signature does not independently prove that confirmation occurred. These controls provide an application/API boundary and do not isolate arbitrary processes running under the same OS user.
 
 Concurrent offline revisions retain competing heads; timestamps and arrival order do not select a winner. To resolve a conflict, review all heads and prepare a replacement JSON containing the eight content fields in the proposal example. To delete a memory, review its heads and publish a tombstone:
 
@@ -193,32 +189,49 @@ The CLI refuses actions whose specified heads differ from its current local view
 Check the local service and CLI first:
 
 ```sh
-systemctl --user status infrastructure-memory.service
 infra-memory status
-infra-memory search 'custom.home.memory.enable' --source repo:nixos-config
+infra-memory search 'QUERY'
 ```
 
-Then call MCP `memory_status` and `search_memory` through the agent harness. A fresh installation can have zero memories/events while still reporting repository documents. Review conflicts, pending events, quarantined events, and `semantic_error`. Check Syncthing separately before claiming all peers are up to date.
+For the Home Manager installation, also check `systemctl --user status infrastructure-memory.service`. Then call MCP `memory_status` and `search_memory` through the agent harness. A fresh installation can have zero memories/events while still reporting configured repository documents. Review conflicts, pending events, quarantined events, and `semantic_error`. If synchronization is configured, check its transport separately before claiming all peers are up to date.
 
 | Symptom                                               | Checks and action                                                                                                                                                                                                                            |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CLI works but MCP returns `No such file or directory` | Verify client configuration and socket selection. The adapter needs the same configuration as the daemon and the runtime-directory fallback described above. Refresh old store-path client entries after deployment and restart the harness. |
 | Ordinary search misses repository content             | Use `--source repo:NAME` or `--source all`; memory-only search is the default. Check the file is tracked, allowlisted, and eligible for ingestion.                                                                                           |
 | Semantic search unavailable                           | Check `semantic_error`, the configured model cache, and whether `infra-memory fetch-model` has completed. Keyword search remains available.                                                                                                  |
-| Peer records missing                                  | Check Syncthing connectivity, shared-folder path, folder errors, and completion. Local ingestion status cannot establish peer freshness.                                                                                                     |
+| Peer records missing (when synchronization is configured) | Check the transport's connectivity, shared-folder path, folder errors, and completion. Local ingestion status cannot establish peer freshness.                                                                                             |
 | Events pending or quarantined                         | Inspect status and source evidence. Missing parents and cycles remain pending; malformed events, invalid/unknown signatures, and UUID payload collisions are quarantined. Trust changes require operator action.                             |
 
 Use the configured Grafana service for infrastructure logs. Do not edit published events to repair ordinary knowledge; propose a revision. An observed UUID collision remains quarantined locally even if one conflicting file disappears, so investigate before rebuilding the index.
 
-## Recovery, path changes, and reset
+## Recovery and reset
 
-To rebuild the disposable index, stop the user service, move `local/index.sqlite3` and any associated `-wal`/`-shm` files aside together, and restart the service. Preserve `local/keys/` and `shared/records/`. The daemon reconstructs materialized records, full-text search, and embeddings; cached model files remain available offline. Do not copy a live SQLite database as an ordinary file backup.
+To rebuild the disposable index, stop the daemon, move `index.sqlite3` and any associated `-wal`/`-shm` files aside together from the configured `state` directory, and restart the daemon. Preserve the `keys/` directory and configured records. The daemon reconstructs materialized records, full-text search, and embeddings; cached model files remain available offline. Do not copy a live SQLite database as an ordinary file backup.
 
-For a legacy path migration, close agents and stop the workstation daemons and Syncthing on all peers. Move the old `~/infrastructure-memory` folder to `~/.local/state/infrastructure-memory/shared`, retaining its Syncthing marker. Move the old state directory's `keys/` and SQLite files into the sibling `local/` directory without overwriting populated destinations. Deploy the new paths before restarting services, then compare record counts, search results, and peer synchronization. Private-key moves and deployment are operator actions. Roll back paths and file moves together while services are stopped if necessary.
+To start over with no retained memories, close agents and stop the daemon. Clear the configured records and the local SQLite index/sidecars; preserve signing keys and trust settings unless deliberately replacing that identity. Restart the daemon and verify zero events/memories and working MCP searches. Repository searches should still work if configured.
 
-To start over with no retained memories, close agents and stop daemons and synchronization on every peer first. Clear the old and new shared records and the local SQLite index/sidecars on each peer; preserve signing keys and trust settings unless deliberately replacing that identity. Recreate the configured shared folder and its Syncthing marker as needed, deploy the matching configuration, and restart services. Verify zero events/memories and successful repository/MCP searches. An uncleared offline peer can reintroduce old records.
+If synchronization is configured, stop daemons and synchronization on every peer before resetting. Clear records and indexes on all peers before restarting; an uncleared offline peer can reintroduce old records.
 
-Back up records, private keys, and trust configuration separately if required; a rebuilt index cannot recover keys or trust. Do not compact tombstones or history until retention accounts for offline peers. Purging sensitive content requires coordinated removal from records, indexes, all peers, and any backups.
+Back up records, private keys, and trust configuration separately if required; a rebuilt index cannot recover keys or trust. When replicating records, do not compact tombstones or history until retention accounts for offline peers. Purging sensitive content requires removal from records, indexes, any replicas, and backups.
+
+## Current deployment and ownership
+
+This repository owns the application, tests, and independent Nix flake. The following describes the maintainer's deployment; these hosts and repositories are not prerequisites for standalone use.
+
+`framework` and `desktop` run independent daemons and indexes.
+
+The consuming `~/nixos-config` repository declares:
+
+| Configuration                                              | Responsibility                                                                     |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `homes/modules/memory.nix`                                 | Package, JSON configuration, repository allowlists, MCP fragment, and user service |
+| `homes/configs/framework.nix`, `homes/configs/desktop.nix` | Enablement through `custom.home.memory.enable`                                     |
+| `homes/files/agents.nix`                                   | Agent instructions to retrieve context and propose supported memories              |
+
+The consuming flake currently uses `github:ruiiiijiiiiang/infrastructure-memory`, with this input's nixpkgs following the infrastructure pin. A local development override requires the application checkout on the machine evaluating the flake; publish application changes before expecting a remote input to include them.
+
+Nix builds require explicit authorization under the infrastructure repository's rules. Deployments and operator signing/trust actions are performed manually.
 
 ## Flake outputs and development
 
@@ -242,7 +255,7 @@ ruff check .
 ruff format --check .
 ```
 
-The suite uses temporary records and real MCP SDK clients without model downloads or running infrastructure. Its Unix-socket integration tests need permission to create local sockets. They exercise both MCP handshakes, tool schemas, JSON text and structured results, validation errors, and the operator CLI boundary. The suite also covers revision ordering, offline conflicts, signatures/trust, tombstones, invalid events, repository scope, and retrieval. Simulated third-peer delivery does not replace a live Syncthing check.
+The suite uses temporary records and real MCP SDK clients without model downloads or running infrastructure. Its Unix-socket integration tests need permission to create local sockets. They exercise both MCP handshakes, tool schemas, JSON text and structured results, validation errors, and the operator CLI boundary. The suite also covers revision ordering, offline conflicts, signatures/trust, tombstones, invalid events, repository scope, and retrieval. Simulated third-peer delivery does not verify an external tool's live synchronization.
 
 Python installations require `mcp>=2.3,<3`. The Nix package and development shell select SDK 2.3.0 through local overrides in `default.nix`: the pinned nixpkgs provides SDK 2.2, so this file overrides the SDK, matching `mcp-types`, HTTP dependencies, and the upstream test dependency locally. Remove these overrides when the pinned package set supplies compatible versions. Updating this application's SDK does not require the standalone `fastmcp` package.
 
