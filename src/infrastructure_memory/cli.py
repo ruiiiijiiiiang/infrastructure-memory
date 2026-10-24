@@ -11,26 +11,47 @@ from .server import request, run_mcp, serve
 
 def parser():
     root = argparse.ArgumentParser(
-        description="Local infrastructure memory; operator actions are CLI-only."
+        description="Local infrastructure memory; operator actions are CLI-only.",
+        epilog="Run %(prog)s COMMAND --help for command-specific options.",
     )
     root.add_argument(
         "--config",
         help="JSON configuration (default: INFRA_MEMORY_CONFIG or /etc/infrastructure-memory.json)",
     )
-    commands = root.add_subparsers(dest="command", required=True)
-    for name in ("serve", "mcp", "status", "key-init", "fetch-model"):
-        commands.add_parser(name)
+    commands = root.add_subparsers(
+        dest="command", title="available commands", metavar="COMMAND"
+    )
+    for name, help_text in (
+        ("serve", "Run the local memory daemon"),
+        ("mcp", "Run the MCP server over stdio"),
+        ("status", "Show daemon status and memory statistics"),
+        ("key-init", "Initialize the operator signing key"),
+        ("fetch-model", "Download the configured embedding model"),
+    ):
+        commands.add_parser(name, help=help_text)
     trust = commands.add_parser(
         "trust-key",
         help="Trust an operator's public key after verifying its fingerprint",
     )
     trust.add_argument("public_key")
-    search = commands.add_parser("search")
+    search = commands.add_parser("search", help="Search infrastructure memories")
     search.add_argument("query")
     search.add_argument("--verified-only", action="store_true")
     search.add_argument("--source", default="memory", help="memory, repo:NAME, or all")
-    get = commands.add_parser("get")
+    get = commands.add_parser("get", help="Show a memory and its current revisions")
     get.add_argument("memory_id")
+    unverified = commands.add_parser(
+        "list-unverified", help="List current unverified memory revisions"
+    )
+    unverified.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum revisions per page (1-100; default: 20)",
+    )
+    unverified.add_argument(
+        "--offset", type=int, default=0, help="Starting position (default: 0)"
+    )
     proposal = commands.add_parser(
         "propose", help="Read proposal parameters from a JSON file"
     )
@@ -40,8 +61,11 @@ def parser():
     )
     approve.add_argument("memory_id")
     approve.add_argument("revision")
-    for name in ("forget", "resolve"):
-        command = commands.add_parser(name)
+    for name, help_text in (
+        ("forget", "Delete a memory after reviewing its current heads"),
+        ("resolve", "Resolve competing revisions using a JSON file"),
+    ):
+        command = commands.add_parser(name, help=help_text)
         command.add_argument("memory_id")
         command.add_argument(
             "--heads",
@@ -57,7 +81,11 @@ def parser():
 
 
 def main():
-    args = parser().parse_args()
+    root = parser()
+    args = root.parse_args()
+    if args.command is None:
+        root.print_help()
+        return 0
     os.umask(0o077)
     try:
         config = Config.load(args.config)
@@ -91,6 +119,12 @@ def main():
             )
         elif command == "get":
             result = request(config, "get_memory", {"memory_id": args.memory_id})
+        elif command == "list-unverified":
+            result = request(
+                config,
+                "list_unverified",
+                {"limit": args.limit, "offset": args.offset},
+            )
         elif command == "propose":
             result = request(
                 config, "propose_memory", json.loads(args.file.read_text())

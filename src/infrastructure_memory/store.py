@@ -317,6 +317,47 @@ class Store:
             for key, data in self.db.execute("SELECT id, data FROM documents")
         }
 
+    def list_unverified(self, limit=20, offset=0):
+        if (
+            type(limit) is not int
+            or not 1 <= limit <= 100
+            or type(offset) is not int
+            or offset < 0
+        ):
+            raise ValueError("limit must be 1-100 and offset must be non-negative")
+        matches = sorted(
+            (
+                (memory, head)
+                for memory in self.memories.values()
+                if not memory["deleted"]
+                for head in memory["heads"]
+                if not head["verified"] and head["kind"] != "delete"
+            ),
+            key=lambda item: (item[0]["memory_id"], item[1]["id"]),
+        )
+        results, size = [], 0
+        for memory, head in matches[offset : offset + limit]:
+            entry = {
+                "memory_id": memory["memory_id"],
+                "revision": head["id"],
+                "conflict": memory["conflict"],
+                "verified": False,
+                **head["content"],
+            }
+            entry_size = len(json.dumps(entry).encode())
+            # Keep pages below the RPC response cap without truncating content.
+            # One maximum-size event still fits, even with JSON Unicode escaping.
+            if results and size + entry_size > 4 * MAX_BYTES:
+                break
+            results.append(entry)
+            size += entry_size
+        next_offset = offset + len(results)
+        return {
+            "results": results,
+            "total": len(matches),
+            "next_offset": next_offset if next_offset < len(matches) else None,
+        }
+
     def status(self):
         return {
             "memories": len(self.memories),

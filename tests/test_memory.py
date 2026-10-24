@@ -84,6 +84,108 @@ class MemoryTest(unittest.TestCase):
         self.store.add(action)
         return action
 
+    def test_list_unverified_current_revisions_and_full_content(self):
+        self.assertEqual(
+            {"results": [], "total": 0, "next_offset": None},
+            self.store.list_unverified(),
+        )
+        original = self.add("Full incident details.\n" * 100)
+        self.assertEqual(
+            [
+                {
+                    "memory_id": original["memory_id"],
+                    "revision": original["id"],
+                    "conflict": False,
+                    "verified": False,
+                    **original["content"],
+                }
+            ],
+            self.store.list_unverified()["results"],
+        )
+        self.operator("approve", original)
+        self.assertEqual([], self.store.list_unverified()["results"])
+        correction = self.add(
+            "corrected details", original["id"], original["memory_id"]
+        )
+        self.assertEqual(
+            [correction["id"]],
+            [entry["revision"] for entry in self.store.list_unverified()["results"]],
+        )
+        self.operator("resolve", correction, content("reviewed resolution"))
+        self.assertEqual([], self.store.list_unverified()["results"])
+        deleted = self.add("deleted incident")
+        self.operator("delete", deleted)
+        self.assertEqual([], self.store.list_unverified()["results"])
+
+    def test_list_unverified_competing_heads_and_deletion_conflict(self):
+        original = self.add()
+        left = self.add("left", original["id"], original["memory_id"])
+        right = self.add("right", original["id"], original["memory_id"])
+        page = self.store.list_unverified()
+        self.assertEqual(2, page["total"])
+        self.assertEqual(
+            sorted([left["id"], right["id"]]),
+            [entry["revision"] for entry in page["results"]],
+        )
+        self.assertTrue(all(entry["conflict"] for entry in page["results"]))
+        self.operator("approve", left)
+        self.assertEqual(
+            [right["id"]],
+            [entry["revision"] for entry in self.store.list_unverified()["results"]],
+        )
+        self.operator("delete", right, parents=[left["id"], right["id"]])
+        self.assertEqual([], self.store.list_unverified()["results"])
+        offline = self.add("offline edit", original["id"], original["memory_id"])
+        page = self.store.list_unverified()
+        self.assertEqual(1, page["total"])
+        self.assertEqual(offline["id"], page["results"][0]["revision"])
+        self.assertTrue(page["results"][0]["conflict"])
+
+    def test_list_unverified_pagination(self):
+        events = [self.add(f"incident {number}") for number in range(5)]
+        expected = sorted((event["memory_id"], event["id"]) for event in events)
+        actual = []
+        for offset, next_offset in ((0, 2), (2, 4), (4, None)):
+            page = self.store.list_unverified(limit=2, offset=offset)
+            self.assertEqual(5, page["total"])
+            self.assertEqual(next_offset, page["next_offset"])
+            actual.extend(
+                (entry["memory_id"], entry["revision"]) for entry in page["results"]
+            )
+        self.assertEqual(expected, actual)
+        self.assertEqual(
+            {"results": [], "total": 5, "next_offset": None},
+            self.store.list_unverified(offset=10),
+        )
+
+    def test_list_unverified_large_unicode_pages_preserve_full_content(self):
+        text = "\U0001f642" * 50000
+        events = [self.add(text) for _ in range(3)]
+        revisions, offset = [], 0
+        while offset is not None:
+            page = self.store.list_unverified(limit=100, offset=offset)
+            self.assertEqual(1, len(page["results"]))
+            self.assertLess(len(json.dumps({"result": page}).encode()), 2 * 1024 * 1024)
+            self.assertEqual(text, page["results"][0]["text"])
+            revisions.append(page["results"][0]["revision"])
+            offset = page["next_offset"]
+        self.assertCountEqual([event["id"] for event in events], revisions)
+
+    def test_list_unverified_rejects_invalid_pagination(self):
+        for params in (
+            {"limit": 0},
+            {"limit": 101},
+            {"limit": True},
+            {"limit": "2"},
+            {"limit": 1.5},
+            {"offset": -1},
+            {"offset": True},
+            {"offset": "0"},
+            {"offset": 0.5},
+        ):
+            with self.subTest(params=params), self.assertRaises(ValueError):
+                self.store.list_unverified(**params)
+
     def test_reimport_and_rebuild(self):
         event = self.add()
         first = copy.deepcopy(self.store.memories)
@@ -566,6 +668,33 @@ class IntegrationTest(unittest.TestCase):
                             return saved
 
                 saved = asyncio.run(exercise())
+                listing = subprocess.run(
+                    [*args, "list-unverified", "--limit", "1", "--offset", "0"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                page = json.loads(listing.stdout)
+                self.assertEqual(1, page["total"])
+                self.assertIsNone(page["next_offset"])
+                self.assertEqual(saved["memory_id"], page["results"][0]["memory_id"])
+                self.assertEqual(saved["event_id"], page["results"][0]["revision"])
+                self.assertEqual("DNS gateway incident", page["results"][0]["text"])
+                self.assertFalse(page["results"][0]["verified"])
+                empty = subprocess.run(
+                    [*args, "list-unverified", "--offset", "1"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual([], json.loads(empty.stdout)["results"])
+                invalid = subprocess.run(
+                    [*args, "list-unverified", "--limit", "0"],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(1, invalid.returncode)
+                self.assertIn("limit must be 1-100", invalid.stderr)
                 # A separately invoked operator approves the explicit reviewed head.
                 subprocess.run([*args, "key-init"], check=True, capture_output=True)
                 subprocess.run(
@@ -581,6 +710,10 @@ class IntegrationTest(unittest.TestCase):
                         break
                     time.sleep(0.05)
                 self.assertEqual(1, len(found["results"]))
+                self.assertEqual(
+                    {"results": [], "total": 0, "next_offset": None},
+                    request(config, "list_unverified"),
+                )
                 with self.assertRaises(ValueError):
                     request(config, "forget_memory", {"memory_id": saved["memory_id"]})
             finally:

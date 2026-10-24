@@ -29,7 +29,10 @@ let
       truststore
     ];
   };
-  mcp-types = python3Packages.mcp-types.override { mcp_2 = mcp; };
+  # Support both the standalone pin and consumers where MCP 2 is the default.
+  mcp-types = python3Packages.mcp-types.override (
+    if lib.versionAtLeast python3Packages.mcp.version "2" then { inherit mcp; } else { mcp_2 = mcp; }
+  );
   blockbuster = python3Packages.blockbuster.overridePythonAttrs {
     version = "1.5.27";
     enabledTestPaths = [ "tests" ];

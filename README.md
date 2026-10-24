@@ -125,9 +125,15 @@ infra-memory search 'custom.home.memory.enable' --source repo:nixos-config
 infra-memory search 'nix_deploy' --source repo:dotfiles
 infra-memory search 'infrastructure-memory' --source all
 infra-memory get MEMORY_UUID
+infra-memory list-unverified
+infra-memory list-unverified --limit 10 --offset 10
 ```
 
 Search defaults to operational memories. Select `repo:NAME` for an indexed checkout or `all` to combine sources. MCP filters include host, service, category, and verification status; host/service filters omit untagged repository documents. MCP `max_chars` bounds excerpt text, with citations and metadata returned in addition.
+
+`list-unverified` returns JSON with `results`, `total`, and `next_offset`. Each result contains the memory ID, revision ID, verification and conflict flags, and all eight content fields without truncation. Only current unverified revisions are listed; verified, superseded, and deleted revisions and repository documents are excluded. Unverified revisions competing with another edit or deletion remain visible with `conflict: true`; use `get` to review all heads before taking action.
+
+Results are ordered by memory ID and revision ID. Pages default to at most 20 revisions (`--limit` accepts 1-100); large entries can produce shorter pages to fit the RPC response size. Continue with `--offset` set to the returned `next_offset` until it is null. Pagination reflects the daemon's local import state and can shift as memories change. The command requires the updated daemon to be running.
 
 Repository ingestion reads explicitly allowlisted Git-tracked files from the local checkout. It skips symlinks, sensitive path names, `.age` files, oversized files, and non-UTF-8 data. Index source files in the repository rather than symlinks installed under `~/.config`. Include patterns match the full repository-relative path using Python `fnmatchcase`, where `*` can match directory separators. Review allowlisted content for inline credentials as well as sensitive filenames.
 

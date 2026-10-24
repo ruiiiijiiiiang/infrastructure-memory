@@ -37,6 +37,8 @@ class Service:
             if set(params) != {"memory_id"}:
                 raise ValueError("expected memory_id")
             return self.store.memories.get(params["memory_id"])
+        if method == "list_unverified":
+            return self.store.list_unverified(**params)
         if method == "propose_memory":
             allowed = {
                 "title",
